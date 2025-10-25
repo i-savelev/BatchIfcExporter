@@ -232,4 +232,4 @@ IsDebugWindow.Show(); // показываем лог в конце
 
 Скрипт не имеет интерфейса и не добавляется на панель. Запустить его можно с помощью моего плагина [PluginsManager](https://github.com/i-savelev/PluginsManager). Для этого нужно указать путь до папки с файлом BatchIfcExporter.dll. Подробнее смотри инструкцию к PluginsManager.
 
-Или с помощью [RevitAddInManager](https://github.com/chuongmep/RevitAddInManager?ysclid=mh6lsbgmoo386554988). так же указав путь до файла BatchIfcExporter.dl.
+Или с помощью [RevitAddInManager](https://github.com/chuongmep/RevitAddInManager?ysclid=mh6lsbgmoo386554988). так же указав путь до файла BatchIfcExporter.dll.
