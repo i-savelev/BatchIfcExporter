@@ -45,7 +45,8 @@
       <HintPath>RevitApi\RevitAPIUI.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="RevitServerBrowser">
+    <Reference Include="RevitServerBrowser, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\RevitServerBrowser\RevitServerBrowser.dll</HintPath>
     </Reference>
     <Reference Include="System" />
