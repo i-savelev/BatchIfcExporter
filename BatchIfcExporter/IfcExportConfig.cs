@@ -1,113 +1,172 @@
 ﻿using Autodesk.Revit.DB;
+using BatchIfcExporter;
+using ISTools;
 using System;
 using System.IO;
 using System.Linq;
-using ISTools;
+using System.Reflection;
+using Document = Autodesk.Revit.DB.Document;
 
 namespace BatchExportIfc
 {
     public class IfcExportConfig
     {
-        public string ViewName { get; set; }
-        public string MappingFile { get; set; }
-        public Document Doc { get; set; }
-        // --- Общие настройки ---
-        public IFCVersion IFCVersion { get; set; } = IFCVersion.IFC4RV;
-        public int SpaceBoundaries { get; set; } = 0; // 0 = нет, 1 = 1-го уровня, 2 = 2-го уровня
-        public bool SplitWallsAndColumns { get; set; } = false;
+        public Document Doc { get; }
+        public string ViewName { get; }
+        public string JsonConfigPath { get; }
 
-        // --- Дополнительное содержимое ---
-        public bool VisibleElementsOfCurrentView { get; set; } = true;
-        public bool ExportRoomsInView { get; set; } = false;
-        public bool Export2DElements { get; set; } = false;
-        public bool ExportLinkedFiles { get; set; } = false; // true = экспортировать, false = не экспортировать
-
-        // --- Наборы свойств ---
-        public bool ExportIFCCommonPropertySets { get; set; } = false;
-        public bool ExportBaseQuantities { get; set; } = false;
-        public bool ExportSchedulesAsPsets { get; set; } = false;
-        public bool ExportSpecificSchedules { get; set; } = false;
-
-        // --- Уровень детализации ---
-        public double TessellationLevelOfDetail { get; set; } = 0.1; // от 0.01 до 1.0
-
-        // --- Расширенные настройки ---
-        public bool ExportPartsAsBuildingElements { get; set; } = false;
-        public bool ExportSolidModelRep { get; set; } = false;
-        public bool UseActiveViewGeometry { get; set; } = true;
-        public bool UseFamilyAndTypeNameForReference { get; set; } = false;
-        public bool Use2DRoomBoundaryForVolume { get; set; } = false;
-        public bool IncludeSiteElevation { get; set; } = false;
-        public bool StoreIFCGUID { get; set; } = false;
-        public bool ExportBoundingBox { get; set; } = false;
-
-
-        public IfcExportConfig(
-            Document doc,
-            string viewName,
-            string mappingFile
-            )
+        public IfcExportConfig(Document doc, string viewName, string jsonConfigPath = null, string mappingOverridePath = null)
         {
             Doc = doc;
             ViewName = viewName;
-            MappingFile = mappingFile;
+            JsonConfigPath = jsonConfigPath;
+            _mappingOverridePath = mappingOverridePath;
+            Logger.Debug("IfcExportConfig", $"Init | View={viewName}, JSON={jsonConfigPath ?? "default"}, MapOverride={mappingOverridePath ?? "null"}");
         }
+        private readonly string _mappingOverridePath;
 
         public IFCExportOptions GetConfig()
         {
-            Autodesk.Revit.DB.View targetView = new FilteredElementCollector(Doc)
+            Logger.Info("IfcExportConfig", $"▶ GetConfig() | Вид: '{ViewName}'");
+
+            var targetView = new FilteredElementCollector(Doc)
                 .OfClass(typeof(Autodesk.Revit.DB.View))
                 .Cast<Autodesk.Revit.DB.View>()
                 .FirstOrDefault(v => v.Name.Equals(ViewName, StringComparison.OrdinalIgnoreCase) && !v.IsTemplate);
 
             if (targetView == null)
             {
-                IsDebugWindow.AddRow($"Вид '{ViewName}' не найден в файле {Doc.Title}");
-              
+                Logger.Error("IfcExportConfig", $"❌ Вид '{ViewName}' не найден");
+                return null;
             }
 
-            BIM.IFC.Export.UI.IFCExportConfiguration config = BIM.IFC.Export.UI.IFCExportConfiguration.CreateDefaultConfiguration();
-            // --- Основные настройки ---
-            //config.ExportIFCCommonPropertySets = true;
-            //config.ExportBaseQuantities = true;
-            config.IFCVersion = IFCVersion;
-            config.SpaceBoundaries = SpaceBoundaries;
-            config.SplitWallsAndColumns = SplitWallsAndColumns;
-            config.VisibleElementsOfCurrentView = VisibleElementsOfCurrentView;
-            config.ExportRoomsInView = ExportRoomsInView;
-            config.Export2DElements = Export2DElements;
-            config.ExportLinkedFiles = ExportLinkedFiles;
-            config.ExportIFCCommonPropertySets = ExportIFCCommonPropertySets;
-            config.ExportBaseQuantities = ExportBaseQuantities;
-            config.ExportSchedulesAsPsets = ExportSchedulesAsPsets;
-            config.ExportSpecificSchedules = ExportSpecificSchedules;
-            if (MappingFile == null)
+            var config = CreateDefaultConfiguration();
+            if (config == null) return null;
+
+            // 🔥 Загрузка и применение JSON (включая ExportUserDefinedPsetsFileName)
+            var jsonLoader = new IfcJsonConfigLoader();
+            jsonLoader.ApplyJsonToConfig(JsonConfigPath, config, config.GetType());
+            if (!string.IsNullOrEmpty(_mappingOverridePath) && File.Exists(_mappingOverridePath))
             {
-                if (File.Exists(MappingFile))
-                {
-                    config.ExportUserDefinedPsets = true;
-                    config.ExportUserDefinedPsetsFileName = MappingFile;
-                }
-                else
-                {
-                    IsDebugWindow.AddRow($"Файл сопоставления не найден: {MappingFile}");
-                }
+                SetConfigProperty(config, "ExportUserDefinedPsets", true);
+                SetConfigProperty(config, "ExportUserDefinedPsetsFileName", _mappingOverridePath);
+                Logger.Info("IfcExportConfig", $"🔄 Мэппинг переопределён из Excel: {Path.GetFileName(_mappingOverridePath)}");
             }
-            
-            config.TessellationLevelOfDetail = TessellationLevelOfDetail;
-            config.ExportPartsAsBuildingElements = ExportPartsAsBuildingElements;
-            config.ExportSolidModelRep = ExportSolidModelRep;
-            config.UseActiveViewGeometry = UseActiveViewGeometry;
-            config.UseFamilyAndTypeNameForReference = UseFamilyAndTypeNameForReference;
-            config.Use2DRoomBoundaryForVolume = Use2DRoomBoundaryForVolume;
-            config.IncludeSiteElevation = IncludeSiteElevation;
-            config.StoreIFCGUID = StoreIFCGUID;
-            config.ExportBoundingBox = ExportBoundingBox;
+            // Создание IFCExportOptions
+            var exportOptions = (IFCExportOptions)Activator.CreateInstance(typeof(IFCExportOptions));
+            UpdateOptionsWithContext(Doc, config, exportOptions, targetView.Id, config.GetType());
 
-            // Создаём опции экспорта и применяем конфигурацию
-            IFCExportOptions exportOptions = new IFCExportOptions();
-            config.UpdateOptions(exportOptions, targetView.Id); // ← Применяем конфиг + указываем ViewId
+            Logger.Info("IfcExportConfig", "✅ GetConfig() завершён");
             return exportOptions;
         }
+
+        #region Вспомогательные методы (без изменений, кроме сигнатур)
+        private object CreateDefaultConfiguration()
+        {
+            string revitPath = Path.GetDirectoryName(typeof(Document).Assembly.Location);
+            string expectedPath = Path.Combine(revitPath, @"AddIns\IFCExporterUI\Autodesk.IFC.Export.UI.dll");
+            Logger.Debug("IfcExportConfig", $"Поиск сборки: {expectedPath}");
+
+            // 🔍 Безопасный поиск без LINQ (обход NotSupportedException в динамических сборках)
+            Assembly loadedAssembly = null;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(asm.Location) &&
+                        string.Equals(asm.Location, expectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        loadedAssembly = asm;
+                        Logger.Debug("IfcExportConfig", $"Сборка найдена в AppDomain: {asm.FullName}");
+                        break;
+                    }
+                }
+                catch (NotSupportedException) { /* Динамические сборки не поддерживают .Location */ }
+                catch { /* Игнорируем другие ошибки доступа к метаданным */ }
+            }
+
+            // Fallback: загрузка с диска, если не найдена в памяти
+            if (loadedAssembly == null && File.Exists(expectedPath))
+            {
+                try
+                {
+                    loadedAssembly = Assembly.LoadFrom(expectedPath);
+                    Logger.Info("IfcExportConfig", $"Сборка загружена вручную: {loadedAssembly.FullName}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("IfcExportConfig", $"❌ Ошибка ручной загрузки сборки: {ex.Message}");
+                    return null;
+                }
+            }
+
+            if (loadedAssembly == null)
+            {
+                Logger.Error("IfcExportConfig", $"❌ Сборка IFCExporterUI не найдена ни в памяти, ни по пути");
+                return null;
+            }
+
+            Type configType = loadedAssembly.GetType("BIM.IFC.Export.UI.IFCExportConfiguration");
+            if (configType == null)
+            {
+                Logger.Error("IfcExportConfig", "❌ Тип IFCExportConfiguration не найден в сборке");
+                return null;
+            }
+
+            var method = configType.GetMethod("CreateDefaultConfiguration", BindingFlags.Public | BindingFlags.Static);
+            if (method == null)
+            {
+                Logger.Error("IfcExportConfig", "❌ Метод CreateDefaultConfiguration не найден");
+                return null;
+            }
+
+            return method.Invoke(null, null);
+        }
+
+        private void SetConfigProperty(object config, string name, object value)
+        {
+            if (config == null) return;
+            var prop = config.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+            if (prop?.CanWrite == true)
+            {
+                try { prop.SetValue(config, value); }
+                catch (Exception ex) { Logger.Warning("IfcExportConfig", $"⚠️ Ошибка установки '{name}': {ex.Message}"); }
+            }
+        }
+
+        private void UpdateOptionsWithContext(Document document, object configuration, IFCExportOptions options, ElementId viewId, Type configType)
+        {
+            try
+            {
+                Assembly ifcAssembly = configType.Assembly;
+                Type commandType = ifcAssembly.GetType("BIM.IFC.Export.UI.IFCCommandOverrideApplication");
+                if (commandType == null) { TryUpdateOptions(configType, configuration, options, viewId, document); return; }
+
+                var prop = commandType.GetProperty("TheDocument", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (prop?.GetSetMethod(true) == null || prop.GetGetMethod(true) == null)
+                { TryUpdateOptions(configType, configuration, options, viewId, document); return; }
+
+                var getter = prop.GetGetMethod(true);
+                var setter = prop.GetSetMethod(true);
+                object prev = getter.Invoke(null, null);
+                try
+                {
+                    setter.Invoke(null, new object[] { document });
+                    TryUpdateOptions(configType, configuration, options, viewId, document);
+                }
+                finally { setter.Invoke(null, new object[] { prev }); }
+            }
+            catch (Exception ex) { Logger.Error("IfcExportConfig", $"❌ UpdateOptionsWithContext: {ex.Message}"); }
+        }
+
+        private void TryUpdateOptions(Type configType, object config, IFCExportOptions options, ElementId viewId, Document document)
+        {
+            var newMethod = configType.GetMethod("UpdateOptions", new[] { typeof(Document), typeof(IFCExportOptions), typeof(ElementId), typeof(bool) });
+            if (newMethod != null) { newMethod.Invoke(config, new object[] { document, options, viewId, false }); return; }
+
+            var legacyMethod = configType.GetMethod("UpdateOptions", new[] { typeof(IFCExportOptions), typeof(ElementId) });
+            if (legacyMethod != null) { legacyMethod.Invoke(config, new object[] { options, viewId }); }
+        }
+        #endregion
     }
 }

@@ -63,9 +63,19 @@ namespace BatchIfcExporter.Properties {
         /// <summary>
         ///   Поиск локализованного ресурса типа System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap IFC {
+        internal static System.Drawing.Bitmap ifc_to_folder {
             get {
-                object obj = ResourceManager.GetObject("IFC", resourceCulture);
+                object obj = ResourceManager.GetObject("ifc_to_folder", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Поиск локализованного ресурса типа System.Drawing.Bitmap.
+        /// </summary>
+        internal static System.Drawing.Bitmap ifc_to_rs {
+            get {
+                object obj = ResourceManager.GetObject("ifc_to_rs", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
