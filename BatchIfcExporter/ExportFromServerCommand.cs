@@ -8,11 +8,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Windows.Forms;
 using Form = System.Windows.Forms.Form;
 
 namespace BatchExportIfc
 {
+    /// <summary>
+    /// Защитник файла мэппинга для обхода бага Autodesk IFC Exporter 2026.
+    /// Мониторит изменение файла после первого экспорта и при необходимости восстанавливает оригинал.
+    /// </summary>
+    
+
     [Transaction(TransactionMode.Manual)]
     public class ExportFromServerCommand : IExternalCommand
     {
@@ -246,7 +253,7 @@ namespace BatchExportIfc
                                     $"❌ Превышено число попыток экспорта для {fileName} (max={MAX_RETRIES})");
                                 IsDebugWindow.AddRow($"💥 {fileName}: retry limit exceeded");
                                 fail++;
-                                doc?.Close(false);
+                                SafeCloseDocument(doc, fileName, app);
                                 continue;
                             }
 
@@ -255,7 +262,7 @@ namespace BatchExportIfc
                                 $"🔄 Попытка #{retryCount}/{MAX_RETRIES} для {fileName}");
 
                             // Закрываем текущий документ перед повторным открытием
-                            doc.Close(false);
+                            SafeCloseDocument(doc, fileName, app);
 
                             // Переоткрываем документ для повторного экспорта
                             var rvtDocRetry = new RvtDocument(app, rsnPath);
@@ -297,7 +304,7 @@ namespace BatchExportIfc
                                 fail++;
                             }
 
-                            docRetry.Close(false);
+                            SafeCloseDocument(docRetry, fileName, app);
                         }
                         else
                         {
@@ -316,8 +323,8 @@ namespace BatchExportIfc
                                 fail++;
                             }
 
-                            // 🔹 Закрываем документ (без сохранения)
-                            doc.Close(false);
+                            // 🔹 Закрываем документ (без сохранения) — безопасная версия
+                            SafeCloseDocument(doc, fileName, app);
                         }
                     }
                     catch (Exception ex)
@@ -346,6 +353,49 @@ namespace BatchExportIfc
                 Logger.Critical($"[EXPORT] Критическая ошибка: {ex}");
                 UpdateStatus(parentForm, "❌ Ошибка экспорта");
                 TaskDialog.Show("Ошибка", $"Не удалось выполнить экспорт:\n{ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 🔥 Безопасное закрытие документа с очисткой кэша (только рабочие API Revit)
+        /// </summary>
+        private void SafeCloseDocument(Document doc, string fileName, Autodesk.Revit.ApplicationServices.Application app)
+        {
+            try
+            {
+                if (doc == null || !doc.IsValidObject)
+                {
+                    Logger.Debug("ExportFromServerCommand", $"🔒 Пропуск закрытия {fileName}: doc=null или невалиден");
+                    return;
+                }
+
+                Logger.Debug("ExportFromServerCommand", $"🔒 Закрытие документа: {fileName} | IsLinked={doc.IsLinked}");
+
+                // 🔥 Не закрываем linked-файлы — это вызывает ошибку "Cannot close a linked file"
+                if (doc.IsLinked)
+                {
+                    Logger.Debug("ExportFromServerCommand", $"⏭ Пропуск Close() для linked: {fileName}");
+                    return;
+                }
+
+                // Стандартное закрытие
+                doc.Close(false);
+                Logger.Debug("ExportFromServerCommand", $"✅ Документ {fileName} закрыт");
+
+                // 🔥 Принудительный GC для очистки кэша сессии (помогает при "залипании" IsLinked)
+                System.GC.Collect();
+                System.GC.WaitForPendingFinalizers();
+                Logger.Debug("ExportFromServerCommand", $"🧹 GC выполнен после закрытия {fileName}");
+            }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException ex)
+                when (ex.Message.IndexOf("linked", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                      ex.Message.IndexOf("Cannot close", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Logger.Warning("ExportFromServerCommand", $"⚠️ Нельзя закрыть linked-файл {fileName}: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("ExportFromServerCommand", $"⚠️ Ошибка при закрытии {fileName}: {ex.Message}");
             }
         }
 
