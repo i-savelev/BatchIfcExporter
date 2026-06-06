@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 
-namespace ISTools
+namespace BatchExportIfc
 {
     public static class ISTimer
     {

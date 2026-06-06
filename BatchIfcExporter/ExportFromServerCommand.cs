@@ -3,7 +3,8 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using BatchIfcExporter;
-using ISTools;
+using DebugWindow = RevitLogger.DebugWindow;
+using Logger = RevitLogger.Logger;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -32,13 +33,7 @@ namespace BatchExportIfc
         {
             try
             {
-                Logger.Clear();
-                Logger.Info("=== Запуск ExportFromServerCommand ===");
-
-                var apiYear = int.Parse(commandData.Application.Application.VersionNumber);
-                var servers = RevitServerBrowser.RevitServerConfigReader.ReadServers(apiYear);
-
-                var form = new RevitServerBrowser.RevitServerBrowserForm(servers, apiYear);
+                var form = new RevitServerBrowser.RevitServerBrowserForm(commandData);
 
                 // 🔹 Подписываемся на кнопку "Подтвердить"
                 form.ConfirmButton.Click += (s, e) =>
@@ -78,14 +73,17 @@ namespace BatchExportIfc
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
-                    Logger.SetOutputFolder(outputFolder, "export_log.log");
-                    Logger.Clear();
-                    Logger.Info("ExportFromServerCommand", "▶ Запуск команды");
-                    Logger.Info("ExportFromServerCommand", $"Список моделей:");
+                    Logger.SetLogPath(Path.Combine(outputFolder, "export_log.log"));
+                    Logger.Init(hostName: "Autodesk Revit",
+                        hostVersionNumber: commandData.Application.Application.VersionNumber,
+                        hostBuild: commandData.Application.Application.VersionBuild,
+                        hasActiveDocument: commandData.Application.ActiveUIDocument != null);
+                    Logger.Info("[ExportFromServerCommand] ▶ Запуск команды");
+                    Logger.Info("[ExportFromServerCommand] Список моделей:");
                     int idx = 1;
                     foreach (var path in selectedPaths)
                     {
-                        Logger.Info("ExportFromServerCommand", $"[{idx}] {path}");
+                        Logger.Info($"[ExportFromServerCommand] [{idx}] {path}");
                         idx++;
                     }
 
@@ -127,8 +125,8 @@ namespace BatchExportIfc
             {
                 message = ex.Message;
                 Logger.Critical($"[CMD] Ошибка: {ex}");
-                IsDebugWindow.AddRow($"ERROR: {ex.Message}");
-                IsDebugWindow.Show();
+                DebugWindow.AddRow($"ERROR: {ex.Message}");
+                DebugWindow.Show();
                 return Result.Failed;
             }
         }
@@ -210,13 +208,13 @@ namespace BatchExportIfc
                             {
                                 mappingGuard = new IfcMappingGuard(modelConfig.MappingFilePath);
                                 firstModelWithMapping = rsnPath;
-                                Logger.Info("ExportFromServerCommand",
-                                    $"🛡️ MappingGuard активирован для: {fileName}");
+                                Logger.Info(
+                                    $"[ExportFromServerCommand] 🛡️ MappingGuard активирован для: {fileName}");
                             }
                             catch (Exception ex)
                             {
-                                Logger.Warning("ExportFromServerCommand",
-                                    $"⚠️ Не удалось инициализировать MappingGuard: {ex.Message}");
+                                Logger.Warning(
+                                    $"[ExportFromServerCommand] ⚠️ Не удалось инициализировать MappingGuard: {ex.Message}");
                             }
                         }
 
@@ -235,8 +233,8 @@ namespace BatchExportIfc
                             firstExportProcessed = true;
                             if (mappingGuard.VerifyAndRestore())
                             {
-                                Logger.Info("ExportFromServerCommand",
-                                    $"🔄 Mapping изменён — повторный экспорт первой модели: {fileName}");
+                                Logger.Info(
+                                    $"[ExportFromServerCommand] 🔄 Mapping изменён — повторный экспорт первой модели: {fileName}");
                                 needsRetry = true;
                             }
                         }
@@ -249,17 +247,17 @@ namespace BatchExportIfc
                         {
                             if (retryCount >= MAX_RETRIES)
                             {
-                                Logger.Error("ExportFromServerCommand",
-                                    $"❌ Превышено число попыток экспорта для {fileName} (max={MAX_RETRIES})");
-                                IsDebugWindow.AddRow($"💥 {fileName}: retry limit exceeded");
+                                Logger.Error(
+                                    $"[ExportFromServerCommand] ❌ Превышено число попыток экспорта для {fileName} (max={MAX_RETRIES})");
+                                DebugWindow.AddRow($"💥 {fileName}: retry limit exceeded");
                                 fail++;
                                 SafeCloseDocument(doc, fileName, app);
                                 continue;
                             }
 
                             retryCount++;
-                            Logger.Debug("ExportFromServerCommand",
-                                $"🔄 Попытка #{retryCount}/{MAX_RETRIES} для {fileName}");
+                            Logger.Debug(
+                                $"[ExportFromServerCommand] 🔄 Попытка #{retryCount}/{MAX_RETRIES} для {fileName}");
 
                             // Закрываем текущий документ перед повторным открытием
                             SafeCloseDocument(doc, fileName, app);
@@ -294,13 +292,13 @@ namespace BatchExportIfc
                             {
                                 long sizeKb = new FileInfo(ifcPath).Length / 1024;
                                 Logger.Info($"[EXPORT] ✅ RETRY: {fileName} → {ifcFileName} ({sizeKb} KB)");
-                                IsDebugWindow.AddRow($"✅ {fileName} (retry)");
+                                DebugWindow.AddRow($"✅ {fileName} (retry)");
                                 success++;
                             }
                             else
                             {
                                 Logger.Warning($"[EXPORT] ⚠️ Файл не создан после retry: {fileName}");
-                                IsDebugWindow.AddRow($"⚠️ Пусто (retry): {fileName}");
+                                DebugWindow.AddRow($"⚠️ Пусто (retry): {fileName}");
                                 fail++;
                             }
 
@@ -313,13 +311,13 @@ namespace BatchExportIfc
                             {
                                 long sizeKb = new FileInfo(ifcPath).Length / 1024;
                                 Logger.Info($"[EXPORT] ✅ {fileName} → {ifcFileName} ({sizeKb} KB)");
-                                IsDebugWindow.AddRow($"✅ {fileName}");
+                                DebugWindow.AddRow($"✅ {fileName}");
                                 success++;
                             }
                             else
                             {
                                 Logger.Warning($"[EXPORT] ⚠️ Файл не создан: {fileName}");
-                                IsDebugWindow.AddRow($"⚠️ Пусто: {fileName}");
+                                DebugWindow.AddRow($"⚠️ Пусто: {fileName}");
                                 fail++;
                             }
 
@@ -331,7 +329,7 @@ namespace BatchExportIfc
                     {
                         Logger.Error($"[EXPORT] ❌ Ошибка {fileName}: {ex.Message}");
                         Logger.Debug($"[EXPORT] Stack: {ex.StackTrace}");
-                        IsDebugWindow.AddRow($"💥 {fileName}: {ex.Message}");
+                        DebugWindow.AddRow($"💥 {fileName}: {ex.Message}");
                         fail++;
                     }
                 }
@@ -340,10 +338,9 @@ namespace BatchExportIfc
                 mappingGuard?.Dispose();
 
                 UpdateStatus(parentForm, $"✅ Готово: {success} ✅ | {fail} ❌");
-                IsDebugWindow.AddRow($"📊 Итог: {success} ✅ | {fail} ❌");
-                IsDebugWindow.AddRow($"Лог RevitServerBrowser: {RevitServerBrowser.Logger.GetPath()}");
+                DebugWindow.AddRow($"📊 Итог: {success} ✅ | {fail} ❌");
 
-                IsDebugWindow.Show();
+                DebugWindow.Show();
 
                 TaskDialog.Show("Экспорт завершён",
                     $"Обработано: {rsnPaths.Count}\n✅ Успешно: {success}\n❌ Ошибок: {fail}");
@@ -365,37 +362,37 @@ namespace BatchExportIfc
             {
                 if (doc == null || !doc.IsValidObject)
                 {
-                    Logger.Debug("ExportFromServerCommand", $"🔒 Пропуск закрытия {fileName}: doc=null или невалиден");
+                    Logger.Debug($"[ExportFromServerCommand] 🔒 Пропуск закрытия {fileName}: doc=null или невалиден");
                     return;
                 }
 
-                Logger.Debug("ExportFromServerCommand", $"🔒 Закрытие документа: {fileName} | IsLinked={doc.IsLinked}");
+                Logger.Debug($"[ExportFromServerCommand] 🔒 Закрытие документа: {fileName} | IsLinked={doc.IsLinked}");
 
                 // 🔥 Не закрываем linked-файлы — это вызывает ошибку "Cannot close a linked file"
                 if (doc.IsLinked)
                 {
-                    Logger.Debug("ExportFromServerCommand", $"⏭ Пропуск Close() для linked: {fileName}");
+                    Logger.Debug($"[ExportFromServerCommand] ⏭ Пропуск Close() для linked: {fileName}");
                     return;
                 }
 
                 // Стандартное закрытие
                 doc.Close(false);
-                Logger.Debug("ExportFromServerCommand", $"✅ Документ {fileName} закрыт");
+                Logger.Debug($"[ExportFromServerCommand] ✅ Документ {fileName} закрыт");
 
                 // 🔥 Принудительный GC для очистки кэша сессии (помогает при "залипании" IsLinked)
                 System.GC.Collect();
                 System.GC.WaitForPendingFinalizers();
-                Logger.Debug("ExportFromServerCommand", $"🧹 GC выполнен после закрытия {fileName}");
+                Logger.Debug($"[ExportFromServerCommand] 🧹 GC выполнен после закрытия {fileName}");
             }
             catch (Autodesk.Revit.Exceptions.InvalidOperationException ex)
                 when (ex.Message.IndexOf("linked", StringComparison.OrdinalIgnoreCase) >= 0 ||
                       ex.Message.IndexOf("Cannot close", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                Logger.Warning("ExportFromServerCommand", $"⚠️ Нельзя закрыть linked-файл {fileName}: {ex.Message}");
+                Logger.Warning($"[ExportFromServerCommand] ⚠️ Нельзя закрыть linked-файл {fileName}: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Logger.Warning("ExportFromServerCommand", $"⚠️ Ошибка при закрытии {fileName}: {ex.Message}");
+                Logger.Warning($"[ExportFromServerCommand] ⚠️ Ошибка при закрытии {fileName}: {ex.Message}");
             }
         }
 

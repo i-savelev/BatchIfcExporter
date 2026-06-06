@@ -1,8 +1,9 @@
 ﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using BatchIfcExporter;
-using ISTools;
 using OfficeOpenXml.Style;
+using Logger = RevitLogger.Logger;
+using DebugWindow = RevitLogger.DebugWindow;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -23,8 +24,11 @@ namespace BatchExportIfc
             try
             {
                 Logger.Clear();
-                Logger.Info("BatchIFCExportCommand", "▶ Открытие окна экспорта моделей из папки");
-
+                Logger.Info("[BatchIFCExportCommand] ▶ Открытие окна экспорта моделей из папки");
+                Logger.Init(hostName: "Autodesk Revit",
+                    hostVersionNumber: commandData.Application.Application.VersionNumber,
+                    hostBuild: commandData.Application.Application.VersionBuild,
+                    hasActiveDocument: commandData.Application.ActiveUIDocument != null);
                 // 🔹 1. Создаём и настраиваем форму
                 var form = new ExportConfigForm();
                 form.Text = "Пакетный экспорт IFC";
@@ -57,7 +61,7 @@ namespace BatchExportIfc
                             {
                                 form.TxtIfcFolder.Text = folderPath;
                                 form.SetStatus($"Папка: {Path.GetFileName(folderPath)}");
-                                Logger.Info("BatchIFCExportCommand", $"Выбрана папка: {folderPath}");
+                                Logger.Info($"[BatchIFCExportCommand] Выбрана папка: {folderPath}");
                             }
                             else
                             {
@@ -83,7 +87,7 @@ namespace BatchExportIfc
                         {
                             form.TxtConfigFile.Text = dlg.FileName;
                             form.SetStatus($"📋 Конфиг: {Path.GetFileName(dlg.FileName)}");
-                            Logger.Info("BatchIFCExportCommand", $"Выбран конфиг: {dlg.FileName}");
+                            Logger.Info($"[BatchIFCExportCommand] Выбран конфиг: {dlg.FileName}");
                         }
                     }
                 };
@@ -105,9 +109,9 @@ namespace BatchExportIfc
             catch (Exception ex)
             {
                 message = ex.Message;
-                Logger.Critical("BatchIFCExportCommand", $"❌ Критическая ошибка: {ex}\n{ex.StackTrace}");
-                IsDebugWindow.AddRow($"ERROR: {ex.Message}");
-                IsDebugWindow.Show();
+                Logger.Critical($"[BatchIFCExportCommand] ❌ Критическая ошибка: {ex}\n{ex.StackTrace}");
+                DebugWindow.AddRow($"ERROR: {ex.Message}");
+                DebugWindow.Show();
                 return Result.Failed;
             }
         }
@@ -170,7 +174,7 @@ namespace BatchExportIfc
                     {
                         CreateTemplateFile(dlg.FileName);
                         form.SetStatus("✅ Шаблон сохранён");
-                        Logger.Info("BatchIFCExportCommand", $"Шаблон сохранён: {dlg.FileName}");
+                        Logger.Info($"[BatchIFCExportCommand] Шаблон сохранён: {dlg.FileName}");
                         TaskDialog.Show("Успех", "Шаблон конфигурации успешно создан!");
                     }
                 }
@@ -178,7 +182,7 @@ namespace BatchExportIfc
             catch (Exception ex)
             {
                 form.SetStatus("❌ Ошибка сохранения");
-                Logger.Error("BatchIFCExportCommand", $"Ошибка сохранения шаблона: {ex.Message}");
+                Logger.Error($"[BatchIFCExportCommand] Ошибка сохранения шаблона: {ex.Message}");
                 TaskDialog.Show("Ошибка", $"Не удалось сохранить шаблон:\n{ex.Message}");
             }
         }
@@ -209,21 +213,21 @@ namespace BatchExportIfc
             try
             {
                 form.SetStatus("🔄 Инициализация...");
-                Logger.SetOutputFolder(folderPath, "export_log.log");
+                Logger.SetLogPath(Path.Combine(folderPath, "export_log.log"));
                 Logger.Clear();
-                Logger.Info("BatchIFCExportCommand", "▶ Запуск команды");
+                Logger.Info("[BatchIFCExportCommand] ▶ Запуск команды");
 
                 UIApplication uiapp = commandData.Application;
                 Autodesk.Revit.ApplicationServices.Application app = uiapp.Application;
 
                 ISTimer.Start();
-                Logger.Debug("BatchIFCExportCommand", $"Revit Version: {app.VersionNumber}");
+                Logger.Debug($"[BatchIFCExportCommand] Revit Version: {app.VersionNumber}");
 
                 // Поиск файлов .rvt
                 string[] rvtFiles = Directory.GetFiles(folderPath, "*.rvt");
-                Logger.Info("BatchIFCExportCommand", $"Найдено файлов .rvt: {rvtFiles.Length}");
+                Logger.Info($"[BatchIFCExportCommand] Найдено файлов .rvt: {rvtFiles.Length}");
                 foreach (var f in rvtFiles)
-                    Logger.Debug("BatchIFCExportCommand", $"  • {Path.GetFileName(f)}");
+                    Logger.Debug($"[BatchIFCExportCommand]   • {Path.GetFileName(f)}");
 
                 if (rvtFiles.Length == 0)
                 {
@@ -245,10 +249,10 @@ namespace BatchExportIfc
                 BatchExportIFC(app, new List<string>(rvtFiles), defaultView, excelConfigs, folderPath);
 
                 var time = ISTimer.Stop();
-                Logger.Info("BatchIFCExportCommand", $"✅ BatchExportIFC завершён | {time}");
+                Logger.Info($"[BatchIFCExportCommand] ✅ BatchExportIFC завершён | {time}");
 
-                IsDebugWindow.AddRow(time);
-                IsDebugWindow.Show();
+                DebugWindow.AddRow(time);
+                DebugWindow.Show();
 
                 form.SetStatus($"✅ Готово | {time}");
                 TaskDialog.Show("Экспорт завершён", $"Обработано файлов: {rvtFiles.Length}\nВремя: {time}");
@@ -256,9 +260,9 @@ namespace BatchExportIfc
             catch (Exception ex)
             {
                 form.SetStatus("❌ Ошибка экспорта");
-                Logger.Critical("BatchIFCExportCommand", $"❌ Ошибка в RunExport: {ex}\n{ex.StackTrace}");
-                IsDebugWindow.AddRow($"ERROR: {ex.Message}");
-                IsDebugWindow.Show();
+                Logger.Critical($"[BatchIFCExportCommand] ❌ Ошибка в RunExport: {ex}\n{ex.StackTrace}");
+                DebugWindow.AddRow($"ERROR: {ex.Message}");
+                DebugWindow.Show();
                 TaskDialog.Show("Ошибка", $"Не удалось выполнить экспорт:\n{ex.Message}");
             }
         }
@@ -273,18 +277,18 @@ namespace BatchExportIfc
             List<IfcModelConfig> excelConfigs,
             string outputFolder)
         {
-            Logger.Debug("BatchIFCExportCommand", $"[Batch] Начало обработки {rvtFiles.Count} файлов");
+            Logger.Debug($"[BatchIFCExportCommand] [Batch] Начало обработки {rvtFiles.Count} файлов");
             int success = 0, fail = 0;
 
             foreach (string rvtPath in rvtFiles)
             {
                 string fileName = Path.GetFileName(rvtPath);
-                Logger.Info("BatchIFCExportCommand", $"[{success + fail + 1}/{rvtFiles.Count}] Обработка: {fileName}");
+                Logger.Info($"[BatchIFCExportCommand] [{success + fail + 1}/{rvtFiles.Count}] Обработка: {fileName}");
 
                 if (!File.Exists(rvtPath))
                 {
-                    Logger.Warning("BatchIFCExportCommand", $"Файл не найден: {fileName}");
-                    IsDebugWindow.AddRow($"❌ Не найден: {fileName}");
+                    Logger.Warning($"[BatchIFCExportCommand] Файл не найден: {fileName}");
+                    DebugWindow.AddRow($"❌ Не найден: {fileName}");
                     fail++;
                     continue;
                 }
@@ -297,8 +301,8 @@ namespace BatchExportIfc
                     var rvtDoc = new RvtDocument(app, rvtPath);
                     string excludePattern = modelConfig.WorksetExcludePattern ?? "Связь";
 
-                    Logger.Debug("BatchIFCExportCommand",
-                        $"Открытие: {fileName} | View: {modelConfig.ViewName ?? defaultView} | Исключение: '{excludePattern}'");
+                    Logger.Debug(
+                        $"[BatchIFCExportCommand] Открытие: {fileName} | View: {modelConfig.ViewName ?? defaultView} | Исключение: '{excludePattern}'");
 
                     var doc = rvtDoc.Open(excludePattern);
                     if (doc == null)
@@ -341,14 +345,14 @@ namespace BatchExportIfc
                     if (File.Exists(ifcPath))
                     {
                         long sizeKb = new FileInfo(ifcPath).Length / 1024;
-                        Logger.Info("BatchIFCExportCommand", $"✅ Экспорт: {fileName} ({sizeKb} KB)");
-                        IsDebugWindow.AddRow($"✅ {fileName}");
+                        Logger.Info($"[BatchIFCExportCommand] ✅ Экспорт: {fileName} ({sizeKb} KB)");
+                        DebugWindow.AddRow($"✅ {fileName}");
                         success++;
                     }
                     else
                     {
-                        Logger.Warning("BatchIFCExportCommand", $"Файл не создан: {fileName}");
-                        IsDebugWindow.AddRow($"⚠️ Пусто: {fileName}");
+                        Logger.Warning($"[BatchIFCExportCommand] Файл не создан: {fileName}");
+                        DebugWindow.AddRow($"⚠️ Пусто: {fileName}");
                         fail++;
                     }
 
@@ -356,14 +360,14 @@ namespace BatchExportIfc
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("BatchIFCExportCommand", $"❌ Ошибка {fileName}: {ex.Message}");
-                    Logger.Debug("BatchIFCExportCommand", $"StackTrace: {ex.StackTrace}");
-                    IsDebugWindow.AddRow($"💥 {fileName}: {ex.Message}");
+                    Logger.Error($"[BatchIFCExportCommand] ❌ Ошибка {fileName}: {ex.Message}");
+                    Logger.Debug($"[BatchIFCExportCommand] StackTrace: {ex.StackTrace}");
+                    DebugWindow.AddRow($"💥 {fileName}: {ex.Message}");
                     fail++;
                 }
             }
 
-            Logger.Info("BatchIFCExportCommand", $"[Batch] Итог: Успешно {success}, Ошибок {fail}");
+            Logger.Info($"[BatchIFCExportCommand] [Batch] Итог: Успешно {success}, Ошибок {fail}");
         }
     }
 }

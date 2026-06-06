@@ -1,7 +1,7 @@
 ﻿using Autodesk.Revit.DB;
 using BatchIfcExporter;
-using ISTools;
 using Newtonsoft.Json.Linq;
+using Logger = RevitLogger.Logger;
 using System;
 using System.IO;
 using System.Reflection;
@@ -40,12 +40,12 @@ namespace BatchExportIfc
         {
             if (string.IsNullOrWhiteSpace(jsonPath) || !File.Exists(jsonPath))
             {
-                Logger.Warning("IfcJsonLoader", "JSON не указан или не найден. Применяются дефолты.");
+                Logger.Warning("[IfcJsonLoader] JSON не указан или не найден. Применяются дефолты.");
                 ApplyDefaults(ifcConfig, configType);
                 return;
             }
 
-            Logger.Info("IfcJsonLoader", $"📄 Загрузка конфигурации: {Path.GetFileName(jsonPath)}");
+            Logger.Info($"[IfcJsonLoader] 📄 Загрузка конфигурации: {Path.GetFileName(jsonPath)}");
             int applied = 0, skipped = 0, uiIgnored = 0, errors = 0;
             string mappingPathFromJson = null;
             try
@@ -57,19 +57,19 @@ namespace BatchExportIfc
                     string key = prop.Name;
                     JToken val = prop.Value;
 
-                    Logger.Debug("IfcJsonLoader", $"🔍 [{key}] JSON тип: {val.Type} | Значение: {val}");
+                    Logger.Debug($"[IfcJsonLoader] 🔍 [{key}] JSON тип: {val.Type} | Значение: {val}");
 
                     // 1. Пропуск null
                     if (val.Type == JTokenType.Null)
                     {
-                        Logger.Debug("IfcJsonLoader", $"⏭ [{key}] Пропущено: значение null");
+                        Logger.Debug($"[IfcJsonLoader] ⏭ [{key}] Пропущено: значение null");
                         continue;
                     }
 
                     // 2. Пропуск вложенных объектов (UI-параметры)
                     if (val.Type == JTokenType.Object)
                     {
-                        Logger.Warning("IfcJsonLoader", $"⏭ [{key}] Пропущено: вложенный объект (UI-параметр, не участвует в экспорте)");
+                        Logger.Warning($"[IfcJsonLoader] ⏭ [{key}] Пропущено: вложенный объект (UI-параметр, не участвует в экспорте)");
                         uiIgnored++;
                         continue;
                     }
@@ -78,11 +78,11 @@ namespace BatchExportIfc
                     var targetProp = configType.GetProperty(key, BindingFlags.Public | BindingFlags.Instance);
                     if (targetProp == null || !targetProp.CanWrite)
                     {
-                        Logger.Warning("IfcJsonLoader", $"⏭ [{key}] Пропущено: свойство отсутствует в IFCExportConfiguration Revit");
+                        Logger.Warning($"[IfcJsonLoader] ⏭ [{key}] Пропущено: свойство отсутствует в IFCExportConfiguration Revit");
                         skipped++;
                         continue;
                     }
-                    Logger.Debug("IfcJsonLoader", $"  ↳ API тип свойства: {targetProp.PropertyType.Name}");
+                    Logger.Debug($"[IfcJsonLoader]   ↳ API тип свойства: {targetProp.PropertyType.Name}");
 
                     // 4. Конвертация и установка (изолированный try-catch)
                     try
@@ -95,7 +95,7 @@ namespace BatchExportIfc
 
                         if (converted == null)
                         {
-                            Logger.Warning("IfcJsonLoader", $"⚠️ [{key}] Конвертация вернула null");
+                            Logger.Warning($"[IfcJsonLoader] ⚠️ [{key}] Конвертация вернула null");
                             errors++;
                             continue;
                         }
@@ -104,11 +104,11 @@ namespace BatchExportIfc
                         if (key == "ExportUserDefinedPsetsFileName") mappingPathFromJson = converted.ToString();
 
                         applied++;
-                        Logger.Debug("IfcJsonLoader", $"✅ [{key}] Успешно применено: {converted}");
+                        Logger.Debug($"[IfcJsonLoader] ✅ [{key}] Успешно применено: {converted}");
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error("IfcJsonLoader", $"❌ [{key}] Ошибка применения: {ex.Message}");
+                        Logger.Error($"[IfcJsonLoader] ❌ [{key}] Ошибка применения: {ex.Message}");
                         errors++;
                     }
                 }
@@ -117,16 +117,16 @@ namespace BatchExportIfc
                 if (!string.IsNullOrEmpty(mappingPathFromJson))
                 {
                     if (File.Exists(mappingPathFromJson))
-                        Logger.Info("IfcJsonLoader", $"📎 Мэппинг найден: {Path.GetFileName(mappingPathFromJson)}");
+                        Logger.Info($"[IfcJsonLoader] 📎 Мэппинг найден: {Path.GetFileName(mappingPathFromJson)}");
                     else
-                        Logger.Warning("IfcJsonLoader", $"⚠️ Мэппинг не найден на диске: {mappingPathFromJson}");
+                        Logger.Warning($"[IfcJsonLoader] ⚠️ Мэппинг не найден на диске: {mappingPathFromJson}");
                 }
 
-                Logger.Info("IfcJsonLoader", $"📊 Итог парсинга: Применено={applied} | Пропущено(API)={skipped} | UI/Null={uiIgnored} | Ошибки={errors}");
+                Logger.Info($"[IfcJsonLoader] 📊 Итог парсинга: Применено={applied} | Пропущено(API)={skipped} | UI/Null={uiIgnored} | Ошибки={errors}");
             }
             catch (Exception ex)
             {
-                Logger.Error("IfcJsonLoader", $"❌ Критическая ошибка парсинга JSON: {ex.Message}. Fallback на дефолты.");
+                Logger.Error($"[IfcJsonLoader] ❌ Критическая ошибка парсинга JSON: {ex.Message}. Fallback на дефолты.");
                 ApplyDefaults(ifcConfig, configType);
             }
         }
@@ -138,7 +138,7 @@ namespace BatchExportIfc
         {
             try
             {
-                Logger.Debug("IfcJsonLoader", $"  🔄 Конвертация '{propName}': {token.Type} → {targetType.Name}");
+                Logger.Debug($"[IfcJsonLoader]   🔄 Конвертация '{propName}': {token.Type} → {targetType.Name}");
 
                 if (targetType == typeof(bool)) return token.ToObject<bool>();
                 if (targetType == typeof(int)) return token.ToObject<int>();
@@ -151,7 +151,7 @@ namespace BatchExportIfc
                     long raw = token.ToObject<long>();
                     if (raw < int.MinValue || raw > int.MaxValue)
                     {
-                        Logger.Warning("IfcJsonLoader", $"  ⚠️ '{propName}': значение {raw} выходит за диапазон int");
+                        Logger.Warning($"[IfcJsonLoader]   ⚠️ '{propName}': значение {raw} выходит за диапазон int");
                         return null;
                     }
                     return SafeCreateElementId((int)raw);
@@ -163,12 +163,12 @@ namespace BatchExportIfc
                     if (token.Type == JTokenType.String) return Enum.Parse(targetType, token.ToString(), true);
                 }
 
-                Logger.Warning("IfcJsonLoader", $"  ⏭ '{propName}': тип {targetType.Name} не поддерживается для конвертации");
+                Logger.Warning($"[IfcJsonLoader]   ⏭ '{propName}': тип {targetType.Name} не поддерживается для конвертации");
                 return null;
             }
             catch (Exception ex)
             {
-                Logger.Warning("IfcJsonLoader", $"  ⚠️ '{propName}': ошибка конвертации → {ex.Message}");
+                Logger.Warning($"[IfcJsonLoader]   ⚠️ '{propName}': ошибка конвертации → {ex.Message}");
                 return null;
             }
         }
@@ -185,12 +185,12 @@ namespace BatchExportIfc
                 if (ctor != null) return ctor.Invoke(new object[] { value });
 
                 // Fallback: в некоторых версиях используется статический метод или поле
-                Logger.Warning("IfcJsonLoader", $"  ⚠️ Конструктор ElementId(int) недоступен. Пропускаем.");
+                Logger.Warning("[IfcJsonLoader]   ⚠️ Конструктор ElementId(int) недоступен. Пропускаем.");
                 return null;
             }
             catch (Exception ex)
             {
-                Logger.Error("IfcJsonLoader", $"  ❌ SafeCreateElementId: {ex.Message}");
+                Logger.Error($"[IfcJsonLoader]   ❌ SafeCreateElementId: {ex.Message}");
                 return null;
             }
         }

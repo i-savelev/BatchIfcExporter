@@ -1,6 +1,6 @@
 ﻿using Autodesk.Revit.DB;
 using BatchIfcExporter;
-using ISTools;
+using Logger = RevitLogger.Logger;
 using System;
 using System.IO;
 using System.Linq;
@@ -21,13 +21,13 @@ namespace BatchExportIfc
             ViewName = viewName;
             JsonConfigPath = jsonConfigPath;
             _mappingOverridePath = mappingOverridePath;
-            Logger.Debug("IfcExportConfig", $"Init | View={viewName}, JSON={jsonConfigPath ?? "default"}, MapOverride={mappingOverridePath ?? "null"}");
+            Logger.Debug($"[IfcExportConfig] Init | View={viewName}, JSON={jsonConfigPath ?? "default"}, MapOverride={mappingOverridePath ?? "null"}");
         }
         private readonly string _mappingOverridePath;
 
         public IFCExportOptions GetConfig()
         {
-            Logger.Info("IfcExportConfig", $"▶ GetConfig() | Вид: '{ViewName}'");
+            Logger.Info($"[IfcExportConfig] ▶ GetConfig() | Вид: '{ViewName}'");
 
             var targetView = new FilteredElementCollector(Doc)
                 .OfClass(typeof(Autodesk.Revit.DB.View))
@@ -36,7 +36,7 @@ namespace BatchExportIfc
 
             if (targetView == null)
             {
-                Logger.Error("IfcExportConfig", $"❌ Вид '{ViewName}' не найден");
+                Logger.Error($"[IfcExportConfig] ❌ Вид '{ViewName}' не найден");
                 return null;
             }
 
@@ -50,13 +50,13 @@ namespace BatchExportIfc
             {
                 SetConfigProperty(config, "ExportUserDefinedPsets", true);
                 SetConfigProperty(config, "ExportUserDefinedPsetsFileName", _mappingOverridePath);
-                Logger.Info("IfcExportConfig", $"🔄 Мэппинг переопределён из Excel: {Path.GetFileName(_mappingOverridePath)}");
+                Logger.Info($"[IfcExportConfig] 🔄 Мэппинг переопределён из Excel: {Path.GetFileName(_mappingOverridePath)}");
             }
             // Создание IFCExportOptions
             var exportOptions = (IFCExportOptions)Activator.CreateInstance(typeof(IFCExportOptions));
             UpdateOptionsWithContext(Doc, config, exportOptions, targetView.Id, config.GetType());
 
-            Logger.Info("IfcExportConfig", "✅ GetConfig() завершён");
+            Logger.Info("[IfcExportConfig] ✅ GetConfig() завершён");
             return exportOptions;
         }
 
@@ -65,7 +65,7 @@ namespace BatchExportIfc
         {
             string revitPath = Path.GetDirectoryName(typeof(Document).Assembly.Location);
             string expectedPath = Path.Combine(revitPath, @"AddIns\IFCExporterUI\Autodesk.IFC.Export.UI.dll");
-            Logger.Debug("IfcExportConfig", $"Поиск сборки: {expectedPath}");
+            Logger.Debug($"[IfcExportConfig] Поиск сборки: {expectedPath}");
 
             // 🔍 Безопасный поиск без LINQ (обход NotSupportedException в динамических сборках)
             Assembly loadedAssembly = null;
@@ -77,7 +77,7 @@ namespace BatchExportIfc
                         string.Equals(asm.Location, expectedPath, StringComparison.OrdinalIgnoreCase))
                     {
                         loadedAssembly = asm;
-                        Logger.Debug("IfcExportConfig", $"Сборка найдена в AppDomain: {asm.FullName}");
+                        Logger.Debug($"[IfcExportConfig] Сборка найдена в AppDomain: {asm.FullName}");
                         break;
                     }
                 }
@@ -91,32 +91,32 @@ namespace BatchExportIfc
                 try
                 {
                     loadedAssembly = Assembly.LoadFrom(expectedPath);
-                    Logger.Info("IfcExportConfig", $"Сборка загружена вручную: {loadedAssembly.FullName}");
+                    Logger.Info($"[IfcExportConfig] Сборка загружена вручную: {loadedAssembly.FullName}");
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error("IfcExportConfig", $"❌ Ошибка ручной загрузки сборки: {ex.Message}");
+                    Logger.Error($"[IfcExportConfig] ❌ Ошибка ручной загрузки сборки: {ex.Message}");
                     return null;
                 }
             }
 
             if (loadedAssembly == null)
             {
-                Logger.Error("IfcExportConfig", $"❌ Сборка IFCExporterUI не найдена ни в памяти, ни по пути");
+                Logger.Error("[IfcExportConfig] ❌ Сборка IFCExporterUI не найдена ни в памяти, ни по пути");
                 return null;
             }
 
             Type configType = loadedAssembly.GetType("BIM.IFC.Export.UI.IFCExportConfiguration");
             if (configType == null)
             {
-                Logger.Error("IfcExportConfig", "❌ Тип IFCExportConfiguration не найден в сборке");
+                Logger.Error("[IfcExportConfig] ❌ Тип IFCExportConfiguration не найден в сборке");
                 return null;
             }
 
             var method = configType.GetMethod("CreateDefaultConfiguration", BindingFlags.Public | BindingFlags.Static);
             if (method == null)
             {
-                Logger.Error("IfcExportConfig", "❌ Метод CreateDefaultConfiguration не найден");
+                Logger.Error("[IfcExportConfig] ❌ Метод CreateDefaultConfiguration не найден");
                 return null;
             }
 
@@ -130,7 +130,7 @@ namespace BatchExportIfc
             if (prop?.CanWrite == true)
             {
                 try { prop.SetValue(config, value); }
-                catch (Exception ex) { Logger.Warning("IfcExportConfig", $"⚠️ Ошибка установки '{name}': {ex.Message}"); }
+                catch (Exception ex) { Logger.Warning($"[IfcExportConfig] ⚠️ Ошибка установки '{name}': {ex.Message}"); }
             }
         }
 
@@ -156,7 +156,7 @@ namespace BatchExportIfc
                 }
                 finally { setter.Invoke(null, new object[] { prev }); }
             }
-            catch (Exception ex) { Logger.Error("IfcExportConfig", $"❌ UpdateOptionsWithContext: {ex.Message}"); }
+            catch (Exception ex) { Logger.Error($"[IfcExportConfig] ❌ UpdateOptionsWithContext: {ex.Message}"); }
         }
 
         private void TryUpdateOptions(Type configType, object config, IFCExportOptions options, ElementId viewId, Document document)

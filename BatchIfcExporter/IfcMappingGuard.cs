@@ -1,5 +1,5 @@
 ﻿using BatchIfcExporter;
-using ISTools;
+using Logger = RevitLogger.Logger;
 using System;
 using System.IO;
 using System.Linq;
@@ -29,7 +29,7 @@ namespace BatchExportIfc
 
             // 🔐 Вычисляем хеш оригинала
             _originalHash = ComputeFileHash(_mappingFilePath);
-            Logger.Debug("IfcMappingGuard", $"🔐 Original hash: {_originalHash}");
+            Logger.Debug($"[IfcMappingGuard] 🔐 Original hash: {_originalHash}");
 
             // 💾 Создаём резервную копию (в Temp, чтобы не мешать пользователю)
             _backupPath = Path.Combine(
@@ -39,7 +39,7 @@ namespace BatchExportIfc
             );
             Directory.CreateDirectory(Path.GetDirectoryName(_backupPath));
             File.Copy(_mappingFilePath, _backupPath, true);
-            Logger.Debug("IfcMappingGuard", $"💾 Backup created: {_backupPath}");
+            Logger.Debug($"[IfcMappingGuard] 💾 Backup created: {_backupPath}");
         }
 
         /// <summary>
@@ -58,27 +58,27 @@ namespace BatchExportIfc
             _isFirstExport = false;
 
             var currentHash = ComputeFileHash(_mappingFilePath);
-            Logger.Debug("IfcMappingGuard", $"🔍 Current hash: {currentHash}");
+            Logger.Debug($"[IfcMappingGuard] 🔍 Current hash: {currentHash}");
 
             if (currentHash != _originalHash)
             {
-                Logger.Warning("IfcMappingGuard",
-                    $"⚠️ Mapping file was MODIFIED by exporter! Restoring original...");
+                Logger.Warning(
+                    $"[IfcMappingGuard] ⚠️ Mapping file was MODIFIED by exporter! Restoring original...");
 
                 RestoreOriginal();
                 return true; // Сигнал: нужен повторный экспорт
             }
 
-            Logger.Debug("IfcMappingGuard", "✅ Mapping file unchanged");
+            Logger.Debug("[IfcMappingGuard] ✅ Mapping file unchanged");
             if (currentHash != _originalHash)
             {
-                Logger.Warning("IfcMappingGuard", $"⚠️ Mapping file was MODIFIED!");
+                Logger.Warning("[IfcMappingGuard] ⚠️ Mapping file was MODIFIED!");
 
                 // 📋 Дамп первых 5 строк для быстрой диагностики
                 try
                 {
                     var lines = File.ReadLines(_mappingFilePath).Take(5);
-                    Logger.Debug("IfcMappingGuard", "📄 Current file preview:\n" + string.Join("\n", lines));
+                    Logger.Debug("[IfcMappingGuard] 📄 Current file preview:\n" + string.Join("\n", lines));
                 }
                 catch { }
 
@@ -105,12 +105,12 @@ namespace BatchExportIfc
                 {
                     File.Copy(_backupPath, _mappingFilePath, true);
                     File.SetLastWriteTime(_mappingFilePath, File.GetLastWriteTime(_backupPath));
-                    Logger.Info("IfcMappingGuard", "🔄 Mapping file restored from backup");
+                    Logger.Info("[IfcMappingGuard] 🔄 Mapping file restored from backup");
                 }
             }
             catch (Exception ex)
             {
-                Logger.Error("IfcMappingGuard", $"❌ Failed to restore mapping: {ex.Message}");
+                Logger.Error($"[IfcMappingGuard] ❌ Failed to restore mapping: {ex.Message}");
             }
         }
 
@@ -134,7 +134,7 @@ namespace BatchExportIfc
                 // 🧹 Удаляем бэкап после завершения работы
                 if (File.Exists(_backupPath))
                     File.Delete(_backupPath);
-                Logger.Debug("IfcMappingGuard", "🗑️ Cleanup: backup removed");
+                Logger.Debug("[IfcMappingGuard] 🗑️ Cleanup: backup removed");
             }
             catch { /* Игнорируем ошибки очистки */ }
 
