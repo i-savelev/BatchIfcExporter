@@ -17,7 +17,7 @@ namespace BatchExportIfc
         public static string IS_TAB_NAME => "ISTools";
         public static string IS_NAME => "Экспорт IFC из папки";
         public static string IS_IMAGE => "BatchIfcExporter.Resources.ifc_to_folder.png";
-        public static string IS_DESCRIPTION => "Автор: https://github.com/i-savelev\r\nПакетный экспорт IFC моделей из выбранной папки в с конфигурацией из Excel";
+        public static string IS_DESCRIPTION => "Автор: https://github.com/i-savelev\r\nРепозиторий: https://github.com/i-savelev/BatchIfcExporter\r\nПакетный экспорт IFC моделей из выбранной папки в с конфигурацией из Excel";
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {

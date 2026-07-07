@@ -27,13 +27,13 @@ namespace BatchExportIfc
         public static string IS_TAB_NAME => "ISTools";
         public static string IS_NAME => "Экспорт IFC с Revit сервера";
         public static string IS_IMAGE => "BatchIfcExporter.Resources.ifc_to_rs.png";
-        public static string IS_DESCRIPTION => "Автор: https://github.com/i-savelev\r\nПакетный экспорт выбранных моделей с Revit Server в IFC с конфигурацией Excel";
+        public static string IS_DESCRIPTION => "Автор: https://github.com/i-savelev\r\nРепозиторий: https://github.com/i-savelev/BatchIfcExporter\r\nПакетный экспорт выбранных моделей с Revit Server в IFC с конфигурацией Excel";
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             try
             {
-                var form = new RevitServerBrowser.RevitServerBrowserForm(commandData);
+                var form = new RevitServerBrowser.RevitServerBrowserNativeForm(commandData);
 
                 // 🔹 Подписываемся на кнопку "Подтвердить"
                 form.ConfirmButton.Click += (s, e) =>
