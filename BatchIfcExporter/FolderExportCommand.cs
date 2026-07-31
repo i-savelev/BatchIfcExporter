@@ -12,7 +12,7 @@ using System.Windows.Forms;
 namespace BatchExportIfc
 {
     [Autodesk.Revit.Attributes.TransactionAttribute(Autodesk.Revit.Attributes.TransactionMode.Manual)]
-    public class BatchIFCExportCommand : IExternalCommand
+    public class FolderExportCommand : IExternalCommand
     {
         public static string IS_TAB_NAME => "ISTools";
         public static string IS_NAME => "Экспорт IFC из папки";

@@ -15,12 +15,6 @@ using Form = System.Windows.Forms.Form;
 
 namespace BatchExportIfc
 {
-    /// <summary>
-    /// Защитник файла мэппинга для обхода бага Autodesk IFC Exporter 2026.
-    /// Мониторит изменение файла после первого экспорта и при необходимости восстанавливает оригинал.
-    /// </summary>
-    
-
     [Transaction(TransactionMode.Manual)]
     public class ExportFromServerCommand : IExternalCommand
     {

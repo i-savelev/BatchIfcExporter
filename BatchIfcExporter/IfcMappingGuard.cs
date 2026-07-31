@@ -1,10 +1,9 @@
-﻿using BatchIfcExporter;
-using Logger = RevitLogger.Logger;
+﻿using Logger = RevitLogger.Logger;
 using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
-using System.Text;
+
 
 namespace BatchExportIfc
 {

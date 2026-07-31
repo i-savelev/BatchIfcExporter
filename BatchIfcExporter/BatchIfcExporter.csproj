@@ -66,7 +66,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="BatchIFCExportCommand.cs" />
+    <Compile Include="FolderExportCommand.cs" />
     <Compile Include="ExcelIfcConfigLoader.cs" />
     <Compile Include="ExportConfigForm.cs">
       <SubType>Form</SubType>
