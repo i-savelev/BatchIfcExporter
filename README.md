@@ -1,5 +1,8 @@
 # BatchIfcExporter
 
+<img width="2800" height="2000" alt="изображение" src="https://github.com/user-attachments/assets/df0b755d-8c86-472a-b1ec-48c75a560764" />
+
+
 Плагин для пакетного экспорта IFC из Revit с гибкой настройкой через Excel и JSON.
 
 ## Основные возможности
