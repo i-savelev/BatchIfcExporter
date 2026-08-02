@@ -20,8 +20,9 @@
 | `KR_` | `C:\Configs\ifc_kr.json` | `IFC Export` |  | `Link` |
 
 ## Установка
+Поддерживаются версии Revit 2022-2026
 1. Скачайте или соберите проект.
-2. Скопируйте **все файлы** из папки `output_dll` в директорию плагинов вашего загрузчика (например, в папку, настроенную для [PluginsManager](https://github.com/i-savelev/PluginsManager)).
+2. Скопируйте **все файлы** из папки `output_dll` в папку, настроенную для [PluginsManager](https://github.com/i-savelev/PluginsManager).
 
 ## Запуск и использование
 1. Откройте Revit и перейдите на вкладку загрузчика (например, `ISTools` в PluginsManager).
