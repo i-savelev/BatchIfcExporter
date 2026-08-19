@@ -92,7 +92,6 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <None Include="AGENTS.md" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>

@@ -7,6 +7,7 @@ using DebugWindow = RevitLogger.DebugWindow;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace BatchExportIfc
@@ -29,31 +30,25 @@ namespace BatchExportIfc
                     hostVersionNumber: commandData.Application.Application.VersionNumber,
                     hostBuild: commandData.Application.Application.VersionBuild,
                     hasActiveDocument: commandData.Application.ActiveUIDocument != null);
-                // 🔹 1. Создаём и настраиваем форму
+
                 var form = new ExportConfigForm();
                 form.Text = "Пакетный экспорт IFC";
 
-                // 🔹 2. Подписываемся на кнопки — ОБЯЗАТЕЛЬНО до ShowDialog()
-
-                // Кнопка: Выбор папки с моделями
                 form.BtnSelectIfcFolder.Click += (s, e) =>
                 {
                     using (var dlg = new OpenFileDialog
                     {
                         Title = "Выберите папку с моделями Revit",
-                        Filter = "Папки|*",                    // 👈 Хак: показываем только папки
-                        CheckFileExists = false,               // 👈 Не требуем файл
-                        CheckPathExists = true,                // 👈 Но путь должен существовать
-                        ValidateNames = false,                 // 👈 Разрешаем любое имя
-                        FileName = "Выберите папку"            // 👈 Подсказка в поле ввода
+                        Filter = "Папки|*",
+                        CheckFileExists = false,
+                        CheckPathExists = true,
+                        ValidateNames = false,
+                        FileName = "Выберите папку"
                     })
                     {
                         if (dlg.ShowDialog(form) == DialogResult.OK)
                         {
-                            // 👈 Извлекаем путь из выбранного "файла"
                             string folderPath = Path.GetDirectoryName(dlg.FileName);
-
-                            // Если пользователь ввёл путь вручную и нажал ОК — используем его
                             if (string.IsNullOrEmpty(folderPath) && Directory.Exists(dlg.FileName))
                                 folderPath = dlg.FileName;
 
@@ -73,7 +68,6 @@ namespace BatchExportIfc
                     }
                 };
 
-                // Кнопка: Выбор файла конфигурации
                 form.BtnSelectConfigFile.Click += (s, e) =>
                 {
                     using (var dlg = new OpenFileDialog
@@ -92,18 +86,11 @@ namespace BatchExportIfc
                     }
                 };
 
-                // Кнопка: Сохранить шаблон конфигурации
                 form.BtnSaveTemplate.Click += (s, e) => SaveConfigTemplate(form);
-
-                // Кнопка: Запуск экспорта
                 form.BtnRunExport.Click += (s, e) => RunExport(commandData, form);
-
-                // Кнопка: Закрыть (стандартное поведение)
                 form.BtnClose.Click += (s, e) => form.Close();
 
-                // 🔹 3. Показываем форму
                 form.ShowDialog();
-
                 return Result.Succeeded;
             }
             catch (Exception ex)
@@ -116,14 +103,8 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// Создаёт и сохраняет шаблон конфигурации в формате .xlsx через EPPlus.
-        /// </summary>
         private void CreateTemplateFile(string path)
         {
-            // ⚠️ EPPlus v5+ требует указания контекста лицензии. 
-            // Установи один раз при старте плагина или оставь здесь.
-
             if (!path.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
                 path += ".xlsx";
 
@@ -131,33 +112,26 @@ namespace BatchExportIfc
             {
                 var ws = package.Workbook.Worksheets.Add("Конфигурация");
 
-                // Заголовки
-                string[] headers = { "FileName", "JsonConfigPath", "ViewName", "MappingFilePath", "WorksetExcludePattern" };
+                // Добавлена колонка FileSuffix
+                string[] headers = { "FileName", "JsonConfigPath", "ViewName", "MappingFilePath", "WorksetExcludePattern", "FileSuffix" };
                 for (int i = 0; i < headers.Length; i++)
                     ws.Cells[1, i + 1].Value = headers[i];
 
-                // Стилизация заголовков
-                var headerRange = ws.Cells["A1:E1"];
+                var headerRange = ws.Cells["A1:F1"];
                 headerRange.Style.Font.Bold = true;
                 headerRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
-                headerRange.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(242, 242, 242)); // Светло-серый
+                headerRange.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(242, 242, 242));
                 headerRange.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
 
-                // Пример строки
-                var example = new object[] { "Project_A.rvt", "Navisworks", "", "", "Связь*" };
+                var example = new object[] { "Project_A.rvt", "", "Navisworks", "", "Связь*", "_AR" };
                 for (int i = 0; i < example.Length; i++)
                     ws.Cells[2, i + 1].Value = example[i];
 
-                // Автоподбор ширины колонок
-                ws.Cells["A1:E2"].AutoFitColumns();
-
+                ws.Cells["A1:F2"].AutoFitColumns();
                 package.Save();
             }
         }
 
-        /// <summary>
-        /// Диалог сохранения шаблона.
-        /// </summary>
         private void SaveConfigTemplate(ExportConfigForm form)
         {
             try
@@ -187,15 +161,11 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// Запускает процесс экспорта с валидацией входных данных.
-        /// </summary>
         private void RunExport(ExternalCommandData commandData, ExportConfigForm form)
         {
             var folderPath = form.IfcFolderPath;
             var excelConfigPath = form.ConfigFilePath;
 
-            // 🔹 Валидация
             if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
             {
                 TaskDialog.Show("Внимание", "Выберите корректную папку с моделями Revit");
@@ -223,7 +193,6 @@ namespace BatchExportIfc
                 ISTimer.Start();
                 Logger.Debug($"[BatchIFCExportCommand] Revit Version: {app.VersionNumber}");
 
-                // Поиск файлов .rvt
                 string[] rvtFiles = Directory.GetFiles(folderPath, "*.rvt");
                 Logger.Info($"[BatchIFCExportCommand] Найдено файлов .rvt: {rvtFiles.Length}");
                 foreach (var f in rvtFiles)
@@ -236,16 +205,13 @@ namespace BatchExportIfc
                     return;
                 }
 
-                // Загрузка конфигурации
                 var excelConfigs = string.IsNullOrEmpty(excelConfigPath)
                     ? new List<IfcModelConfig>()
                     : ExcelIfcConfigLoader.Load(excelConfigPath);
 
                 string defaultView = "Navisworks";
-
                 form.SetStatus($"🚀 Экспорт {rvtFiles.Length} файлов...");
 
-                // 🔹 Запуск основного процесса
                 BatchExportIFC(app, new List<string>(rvtFiles), defaultView, excelConfigs, folderPath);
 
                 var time = ISTimer.Stop();
@@ -267,9 +233,6 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// Основной метод пакетного экспорта.
-        /// </summary>
         private void BatchExportIFC(
             Autodesk.Revit.ApplicationServices.Application app,
             List<string> rvtFiles,
@@ -279,6 +242,10 @@ namespace BatchExportIfc
         {
             Logger.Debug($"[BatchIFCExportCommand] [Batch] Начало обработки {rvtFiles.Count} файлов");
             int success = 0, fail = 0;
+
+            string ifcOutputFolder = Path.Combine(outputFolder, "IFC_Output");
+            if (!Directory.Exists(ifcOutputFolder))
+                Directory.CreateDirectory(ifcOutputFolder);
 
             foreach (string rvtPath in rvtFiles)
             {
@@ -295,14 +262,14 @@ namespace BatchExportIfc
 
                 try
                 {
-                    // 🔍 Резолвим конфигурацию для текущей модели
-                    var modelConfig = ExcelIfcConfigLoader.Resolve(fileName, excelConfigs);
+                    // Получаем ВСЕ конфигурации для данной модели
+                    var modelConfigs = ExcelIfcConfigLoader.ResolveAll(fileName, excelConfigs);
+                    var firstConfig = modelConfigs.First();
 
                     var rvtDoc = new RvtDocument(app, rvtPath);
-                    string excludePattern = modelConfig.WorksetExcludePattern ?? "Связь";
+                    string excludePattern = firstConfig.WorksetExcludePattern ?? "Связь";
 
-                    Logger.Debug(
-                        $"[BatchIFCExportCommand] Открытие: {fileName} | View: {modelConfig.ViewName ?? defaultView} | Исключение: '{excludePattern}'");
+                    Logger.Debug($"[BatchIFCExportCommand] Открытие: {fileName} | Исключение: '{excludePattern}' | Конфигов: {modelConfigs.Count}");
 
                     var doc = rvtDoc.Open(excludePattern);
                     if (doc == null)
@@ -311,49 +278,63 @@ namespace BatchExportIfc
                         continue;
                     }
 
-                    // Создаём конфиг с разрешёнными параметрами
-                    var ifcCfg = new IfcExportConfig(
-                        doc,
-                        modelConfig.ViewName ?? defaultView,
-                        modelConfig.JsonConfigPath,
-                        modelConfig.MappingFilePath // Переопределение мэппинга
-                    );
+                    int modelSuccess = 0;
 
-                    var exportOptions = ifcCfg.GetConfig();
-                    if (exportOptions == null)
+                    // Цикл по всем видам (конфигурациям) текущей модели
+                    foreach (var modelConfig in modelConfigs)
                     {
-                        doc.Close(false);
-                        fail++;
-                        continue;
-                    }
+                        try
+                        {
+                            var ifcCfg = new IfcExportConfig(
+                                doc,
+                                modelConfig.ViewName ?? defaultView,
+                                modelConfig.JsonConfigPath,
+                                modelConfig.MappingFilePath
+                            );
 
-                    // Путь для экспорта — в ту же папку или в подпапку Output
-                    string ifcOutputFolder = Path.Combine(outputFolder, "IFC_Output");
-                    if (!Directory.Exists(ifcOutputFolder))
-                        Directory.CreateDirectory(ifcOutputFolder);
+                            var exportOptions = ifcCfg.GetConfig();
+                            if (exportOptions == null)
+                            {
+                                Logger.Warning($"[BatchIFCExportCommand] ⚠️ Не удалось получить настройки для вида {modelConfig.ViewName}");
+                                continue;
+                            }
 
-                    string ifcFileName = Path.ChangeExtension(fileName, ".ifc");
-                    string ifcPath = Path.Combine(ifcOutputFolder, ifcFileName);
+                            // Формирование уникального имени файла
+                            string suffix = !string.IsNullOrEmpty(modelConfig.FileSuffix)
+                                ? modelConfig.FileSuffix
+                                : (modelConfigs.Count > 1 ? $"_{modelConfig.ViewName}" : "");
 
-                    using (Transaction tx = new Transaction(doc, "BatchIFCExport"))
-                    {
-                        tx.Start();
-                        doc.Export(Path.GetDirectoryName(ifcPath), Path.GetFileName(ifcPath), exportOptions);
-                        tx.Commit();
-                    }
+                            string ifcFileName = Path.GetFileNameWithoutExtension(fileName) + suffix + ".ifc";
+                            string ifcPath = Path.Combine(ifcOutputFolder, ifcFileName);
 
-                    if (File.Exists(ifcPath))
-                    {
-                        long sizeKb = new FileInfo(ifcPath).Length / 1024;
-                        Logger.Info($"[BatchIFCExportCommand] ✅ Экспорт: {fileName} ({sizeKb} KB)");
-                        DebugWindow.AddRow($"✅ {fileName}");
-                        success++;
-                    }
-                    else
-                    {
-                        Logger.Warning($"[BatchIFCExportCommand] Файл не создан: {fileName}");
-                        DebugWindow.AddRow($"⚠️ Пусто: {fileName}");
-                        fail++;
+                            using (Transaction tx = new Transaction(doc, $"BatchIFCExport_{modelConfig.ViewName}"))
+                            {
+                                tx.Start();
+                                doc.Export(ifcOutputFolder, ifcFileName, exportOptions);
+                                tx.Commit();
+                            }
+
+                            if (File.Exists(ifcPath))
+                            {
+                                long sizeKb = new FileInfo(ifcPath).Length / 1024;
+                                Logger.Info($"[BatchIFCExportCommand] ✅ Экспорт: {ifcFileName} ({sizeKb} KB)");
+                                DebugWindow.AddRow($"✅ {ifcFileName}");
+                                modelSuccess++;
+                                success++;
+                            }
+                            else
+                            {
+                                Logger.Warning($"[BatchIFCExportCommand] Файл не создан: {ifcFileName}");
+                                DebugWindow.AddRow($"⚠️ Пусто: {ifcFileName}");
+                                fail++;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error($"[BatchIFCExportCommand] ❌ Ошибка экспорта вида {modelConfig.ViewName} для {fileName}: {ex.Message}");
+                            DebugWindow.AddRow($"💥 {fileName} ({modelConfig.ViewName}): {ex.Message}");
+                            fail++;
+                        }
                     }
 
                     doc.Close(false);
@@ -367,7 +348,7 @@ namespace BatchExportIfc
                 }
             }
 
-            Logger.Info($"[BatchIFCExportCommand] [Batch] Итог: Успешно {success}, Ошибок {fail}");
+            Logger.Info($"[BatchIFCExportCommand] [Batch] Итог: Успешных экспортов {success}, Ошибок {fail}");
         }
     }
 }

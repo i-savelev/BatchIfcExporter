@@ -9,7 +9,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Windows.Forms;
 using Form = System.Windows.Forms.Form;
 
@@ -29,7 +28,6 @@ namespace BatchExportIfc
             {
                 var form = new RevitServerBrowser.RevitServerBrowserNativeForm(commandData);
 
-                // 🔹 Подписываемся на кнопку "Подтвердить"
                 form.ConfirmButton.Click += (s, e) =>
                 {
                     var selectedPaths = form.SelectedModelPaths;
@@ -41,7 +39,6 @@ namespace BatchExportIfc
                         return;
                     }
 
-                    // 🔹 Диалог 1: Выбор папки (через OpenFileDialog)
                     string outputFolder = null;
                     using (var dlgFolder = new OpenFileDialog
                     {
@@ -81,7 +78,6 @@ namespace BatchExportIfc
                         idx++;
                     }
 
-                    // 🔹 Диалог 2: Выбор Excel-конфигурации (опционально)
                     string configPath = null;
                     var dlgResult = MessageBox.Show(form,
                         "Использовать конфигурацию из Excel?\n\n• ViewName\n• JsonConfigPath\n• MappingFilePath\n• WorksetExcludePattern\n\n«Нет» — экспорт с настройками по умолчанию.",
@@ -107,7 +103,6 @@ namespace BatchExportIfc
                         }
                     }
 
-                    // 🔹 Запуск экспорта
                     RunExport(commandData, selectedPaths, outputFolder, configPath, form);
                 };
 
@@ -125,9 +120,6 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// Синхронный экспорт моделей с использованием RvtDocument.
-        /// </summary>
         private void RunExport(
             ExternalCommandData commandData,
             IReadOnlyList<string> rsnPaths,
@@ -143,7 +135,6 @@ namespace BatchExportIfc
                 var app = commandData.Application.Application;
                 int success = 0, fail = 0;
 
-                // Загрузка конфигурации
                 var excelConfigs = string.IsNullOrEmpty(excelConfigPath)
                     ? new List<IfcModelConfig>()
                     : ExcelIfcConfigLoader.Load(excelConfigPath);
@@ -153,7 +144,6 @@ namespace BatchExportIfc
                 if (!Directory.Exists(outputFolder))
                     Directory.CreateDirectory(outputFolder);
 
-                // 🛡️ Инициализация защитника мэппинга (для первой модели с валидным mapping)
                 IfcMappingGuard mappingGuard = null;
                 string firstModelWithMapping = null;
                 bool firstExportProcessed = false;
@@ -166,74 +156,90 @@ namespace BatchExportIfc
 
                     try
                     {
+                        var modelConfigs = ExcelIfcConfigLoader.ResolveAll(fileName, excelConfigs);
+                        var firstConfig = modelConfigs.First();
+                        string excludePattern = firstConfig.WorksetExcludePattern ?? "Связь";
+
                         var rvtDoc = new RvtDocument(app, rsnPath);
-
-                        // Получаем паттерн исключения из конфига или используем дефолт
-                        var modelConfig = ExcelIfcConfigLoader.Resolve(fileName, excelConfigs);
-                        string excludePattern = modelConfig.WorksetExcludePattern ?? "Связь";
-
-                        // Открываем документ (RvtDocument.Open() уже делает всю магию с ворксетами)
                         var doc = rvtDoc.Open(excludePattern);
                         if (doc == null)
                             throw new Exception("Не удалось открыть документ");
 
-                        // 🔹 Создаём настройки экспорта
-                        var ifcCfg = new IfcExportConfig(
-                            doc,
-                            modelConfig.ViewName ?? defaultView,
-                            modelConfig.JsonConfigPath,
-                            modelConfig.MappingFilePath
-                        );
-
-                        var exportOptions = ifcCfg.GetConfig();
-                        if (exportOptions == null)
-                            throw new Exception("Не удалось получить настройки экспорта");
-
-                        var ifcFileName = Path.ChangeExtension(fileName, ".ifc");
-                        var ifcPath = Path.Combine(outputFolder, ifcFileName);
-
-                        // 🛡️ Инициализируем защитник для ПЕРВОГО файла с валидным mapping
                         if (!firstExportProcessed &&
-                            !string.IsNullOrEmpty(modelConfig.MappingFilePath) &&
-                            File.Exists(modelConfig.MappingFilePath) &&
+                            !string.IsNullOrEmpty(firstConfig.MappingFilePath) &&
+                            File.Exists(firstConfig.MappingFilePath) &&
                             mappingGuard == null)
                         {
                             try
                             {
-                                mappingGuard = new IfcMappingGuard(modelConfig.MappingFilePath);
+                                mappingGuard = new IfcMappingGuard(firstConfig.MappingFilePath);
                                 firstModelWithMapping = rsnPath;
-                                Logger.Info(
-                                    $"[ExportFromServerCommand] 🛡️ MappingGuard активирован для: {fileName}");
+                                Logger.Info($"[ExportFromServerCommand] 🛡️ MappingGuard активирован для: {fileName}");
                             }
                             catch (Exception ex)
                             {
-                                Logger.Warning(
-                                    $"[ExportFromServerCommand] ⚠️ Не удалось инициализировать MappingGuard: {ex.Message}");
+                                Logger.Warning($"[ExportFromServerCommand] ⚠️ Не удалось инициализировать MappingGuard: {ex.Message}");
                             }
                         }
 
-                        // 🔹 Экспорт
-                        using (var tx = new Transaction(doc, "ExportIFC"))
+                        bool needsRetry = false;
+                        int modelSuccess = 0;
+                        int modelFail = 0;
+
+                        void ExportAllViews(Document currentDoc)
                         {
-                            tx.Start();
-                            doc.Export(outputFolder, ifcFileName, exportOptions);
-                            tx.Commit();
+                            modelSuccess = 0;
+                            modelFail = 0;
+                            foreach (var modelConfig in modelConfigs)
+                            {
+                                var ifcCfg = new IfcExportConfig(currentDoc, modelConfig.ViewName ?? defaultView, modelConfig.JsonConfigPath, modelConfig.MappingFilePath);
+                                var exportOptions = ifcCfg.GetConfig();
+                                if (exportOptions == null) continue;
+
+                                string suffix = !string.IsNullOrEmpty(modelConfig.FileSuffix)
+                                    ? modelConfig.FileSuffix
+                                    : (modelConfigs.Count > 1 ? $"_{modelConfig.ViewName}" : "");
+
+                                string ifcFileName = Path.GetFileNameWithoutExtension(fileName) + suffix + ".ifc";
+                                var ifcPath = Path.Combine(outputFolder, ifcFileName);
+
+                                using (var tx = new Transaction(currentDoc, $"ExportIFC_{modelConfig.ViewName}"))
+                                {
+                                    tx.Start();
+                                    currentDoc.Export(outputFolder, ifcFileName, exportOptions);
+                                    tx.Commit();
+                                }
+
+                                if (File.Exists(ifcPath))
+                                {
+                                    long sizeKb = new FileInfo(ifcPath).Length / 1024;
+                                    Logger.Info($"[EXPORT] ✅ {ifcFileName} ({sizeKb} KB)");
+                                    DebugWindow.AddRow($"✅ {ifcFileName}");
+                                    modelSuccess++;
+                                    success++;
+                                }
+                                else
+                                {
+                                    Logger.Warning($"[EXPORT] ⚠️ Файл не создан: {ifcFileName}");
+                                    DebugWindow.AddRow($"⚠️ Пусто: {ifcFileName}");
+                                    modelFail++;
+                                    fail++;
+                                }
+                            }
                         }
 
-                        // 🛡️ Проверка mapping-файла после ПЕРВОГО экспорта
-                        bool needsRetry = false;
+                        ExportAllViews(doc);
+
                         if (mappingGuard != null && !firstExportProcessed)
                         {
                             firstExportProcessed = true;
                             if (mappingGuard.VerifyAndRestore())
                             {
-                                Logger.Info(
-                                    $"[ExportFromServerCommand] 🔄 Mapping изменён — повторный экспорт первой модели: {fileName}");
+                                Logger.Info($"[ExportFromServerCommand] 🔄 Mapping изменён — повторный экспорт первой модели: {fileName}");
                                 needsRetry = true;
                             }
                         }
 
-                        // 🔁 Защита от бесконечного retry
                         int retryCount = 0;
                         const int MAX_RETRIES = 2;
 
@@ -241,81 +247,30 @@ namespace BatchExportIfc
                         {
                             if (retryCount >= MAX_RETRIES)
                             {
-                                Logger.Error(
-                                    $"[ExportFromServerCommand] ❌ Превышено число попыток экспорта для {fileName} (max={MAX_RETRIES})");
+                                Logger.Error($"[ExportFromServerCommand] ❌ Превышено число попыток экспорта для {fileName} (max={MAX_RETRIES})");
                                 DebugWindow.AddRow($"💥 {fileName}: retry limit exceeded");
-                                fail++;
                                 SafeCloseDocument(doc, fileName, app);
                                 continue;
                             }
 
                             retryCount++;
-                            Logger.Debug(
-                                $"[ExportFromServerCommand] 🔄 Попытка #{retryCount}/{MAX_RETRIES} для {fileName}");
+                            Logger.Debug($"[ExportFromServerCommand] 🔄 Попытка #{retryCount}/{MAX_RETRIES} для {fileName}");
 
-                            // Закрываем текущий документ перед повторным открытием
+                            success -= modelSuccess;
+                            fail -= modelFail;
+
                             SafeCloseDocument(doc, fileName, app);
 
-                            // Переоткрываем документ для повторного экспорта
                             var rvtDocRetry = new RvtDocument(app, rsnPath);
                             var docRetry = rvtDocRetry.Open(excludePattern);
                             if (docRetry == null)
                                 throw new Exception("Не удалось переоткрыть документ для retry");
 
-                            // Получаем настройки экспорта заново (mapping уже восстановлен)
-                            var ifcCfgRetry = new IfcExportConfig(
-                                docRetry,
-                                modelConfig.ViewName ?? defaultView,
-                                modelConfig.JsonConfigPath,
-                                modelConfig.MappingFilePath
-                            );
-                            var exportOptionsRetry = ifcCfgRetry.GetConfig();
-                            if (exportOptionsRetry == null)
-                                throw new Exception("Не удалось получить настройки экспорта (retry)");
-
-                            // Повторный экспорт
-                            using (var tx = new Transaction(docRetry, "ExportIFC_Retry"))
-                            {
-                                tx.Start();
-                                docRetry.Export(outputFolder, ifcFileName, exportOptionsRetry);
-                                tx.Commit();
-                            }
-
-                            // Проверяем результат повторного экспорта
-                            if (File.Exists(ifcPath))
-                            {
-                                long sizeKb = new FileInfo(ifcPath).Length / 1024;
-                                Logger.Info($"[EXPORT] ✅ RETRY: {fileName} → {ifcFileName} ({sizeKb} KB)");
-                                DebugWindow.AddRow($"✅ {fileName} (retry)");
-                                success++;
-                            }
-                            else
-                            {
-                                Logger.Warning($"[EXPORT] ⚠️ Файл не создан после retry: {fileName}");
-                                DebugWindow.AddRow($"⚠️ Пусто (retry): {fileName}");
-                                fail++;
-                            }
-
+                            ExportAllViews(docRetry);
                             SafeCloseDocument(docRetry, fileName, app);
                         }
                         else
                         {
-                            // Стандартная обработка успеха
-                            if (File.Exists(ifcPath))
-                            {
-                                long sizeKb = new FileInfo(ifcPath).Length / 1024;
-                                Logger.Info($"[EXPORT] ✅ {fileName} → {ifcFileName} ({sizeKb} KB)");
-                                DebugWindow.AddRow($"✅ {fileName}");
-                                success++;
-                            }
-                            else
-                            {
-                                Logger.Warning($"[EXPORT] ⚠️ Файл не создан: {fileName}");
-                                DebugWindow.AddRow($"⚠️ Пусто: {fileName}");
-                                fail++;
-                            }
-
-                            // 🔹 Закрываем документ (без сохранения) — безопасная версия
                             SafeCloseDocument(doc, fileName, app);
                         }
                     }
@@ -328,7 +283,6 @@ namespace BatchExportIfc
                     }
                 }
 
-                // 🧹 Очистка защитника
                 mappingGuard?.Dispose();
 
                 UpdateStatus(parentForm, $"✅ Готово: {success} ✅ | {fail} ❌");
@@ -347,9 +301,6 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// 🔥 Безопасное закрытие документа с очисткой кэша (только рабочие API Revit)
-        /// </summary>
         private void SafeCloseDocument(Document doc, string fileName, Autodesk.Revit.ApplicationServices.Application app)
         {
             try
@@ -362,18 +313,15 @@ namespace BatchExportIfc
 
                 Logger.Debug($"[ExportFromServerCommand] 🔒 Закрытие документа: {fileName} | IsLinked={doc.IsLinked}");
 
-                // 🔥 Не закрываем linked-файлы — это вызывает ошибку "Cannot close a linked file"
                 if (doc.IsLinked)
                 {
                     Logger.Debug($"[ExportFromServerCommand] ⏭ Пропуск Close() для linked: {fileName}");
                     return;
                 }
 
-                // Стандартное закрытие
                 doc.Close(false);
                 Logger.Debug($"[ExportFromServerCommand] ✅ Документ {fileName} закрыт");
 
-                // 🔥 Принудительный GC для очистки кэша сессии (помогает при "залипании" IsLinked)
                 System.GC.Collect();
                 System.GC.WaitForPendingFinalizers();
                 Logger.Debug($"[ExportFromServerCommand] 🧹 GC выполнен после закрытия {fileName}");
@@ -390,9 +338,6 @@ namespace BatchExportIfc
             }
         }
 
-        /// <summary>
-        /// Обновление статуса через заголовок окна (без рефлексии).
-        /// </summary>
         private void UpdateStatus(Form form, string text)
         {
             if (form?.IsHandleCreated == true)
