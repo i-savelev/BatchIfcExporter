@@ -64,11 +64,13 @@ namespace BatchExportIfc
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
+
                     Logger.SetLogPath(Path.Combine(outputFolder, "export_log.log"));
                     Logger.Init(hostName: "Autodesk Revit",
                         hostVersionNumber: commandData.Application.Application.VersionNumber,
                         hostBuild: commandData.Application.Application.VersionBuild,
                         hasActiveDocument: commandData.Application.ActiveUIDocument != null);
+
                     Logger.Info("[ExportFromServerCommand] ▶ Запуск команды");
                     Logger.Info("[ExportFromServerCommand] Список моделей:");
                     int idx = 1;
@@ -133,6 +135,7 @@ namespace BatchExportIfc
                 Logger.Info($"[EXPORT] Начало: {rsnPaths.Count} моделей");
 
                 var app = commandData.Application.Application;
+                var activeDoc = commandData.Application.ActiveUIDocument?.Document;
                 int success = 0, fail = 0;
 
                 var excelConfigs = string.IsNullOrEmpty(excelConfigPath)
@@ -156,12 +159,55 @@ namespace BatchExportIfc
 
                     try
                     {
+                        // ==========================================================
+                        // ЭКСПЕРИМЕНТ: Очистка сессии ПЕРЕД каждым открытием
+                        // ==========================================================
+                        Logger.Info($"[EXPORT] 🧹 Попытка очистки сессии перед открытием '{fileName}'...");
+                        var docsToClose = new List<Document>();
+
+                        foreach (Document _doc in app.Documents)
+                        {
+                            if (_doc.IsValidObject && _doc != activeDoc && !_doc.IsLinked)
+                            {
+                                docsToClose.Add(_doc);
+                            }
+                        }
+
+                        int closedCount = 0;
+                        foreach (var _doc in docsToClose)
+                        {
+                            try
+                            {
+                                Logger.Debug($"[EXPORT] Попытка закрытия: '{_doc.Title}' (Modified={_doc.IsModified})");
+                                _doc.Close(false);
+                                closedCount++;
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning($"[EXPORT] Не удалось закрыть '{_doc.Title}': {ex.Message}");
+                            }
+                        }
+
+                        if (closedCount > 0)
+                        {
+                            Logger.Info($"[EXPORT] ✅ Закрыто документов: {closedCount}");
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                            Logger.Info("[EXPORT] 🧹 Сборщик мусора (GC) выполнен.");
+                        }
+                        else
+                        {
+                            Logger.Debug("[EXPORT] ℹ️ Нечего закрывать (все оставшиеся документы либо активные, либо связи).");
+                        }
+                        // ==========================================================
+
                         var modelConfigs = ExcelIfcConfigLoader.ResolveAll(fileName, excelConfigs);
                         var firstConfig = modelConfigs.First();
                         string excludePattern = firstConfig.WorksetExcludePattern ?? "Связь";
 
                         var rvtDoc = new RvtDocument(app, rsnPath);
                         var doc = rvtDoc.Open(excludePattern);
+
                         if (doc == null)
                             throw new Exception("Не удалось открыть документ");
 

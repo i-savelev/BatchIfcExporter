@@ -23,21 +23,35 @@ namespace BatchExportIfc
             _mappingOverridePath = mappingOverridePath;
             Logger.Debug($"[IfcExportConfig] Init | View={viewName}, JSON={jsonConfigPath ?? "default"}, MapOverride={mappingOverridePath ?? "null"}");
         }
+
         private readonly string _mappingOverridePath;
 
         public IFCExportOptions GetConfig()
         {
-            Logger.Info($"[IfcExportConfig] ▶ GetConfig() | Вид: '{ViewName}'");
+            Logger.Info($"[IfcExportConfig] ▶ GetConfig() | Запрошенный вид: '{(string.IsNullOrEmpty(ViewName) ? "Не указан" : ViewName)}'");
 
-            var targetView = new FilteredElementCollector(Doc)
-                .OfClass(typeof(Autodesk.Revit.DB.View))
-                .Cast<Autodesk.Revit.DB.View>()
-                .FirstOrDefault(v => v.Name.Equals(ViewName, StringComparison.OrdinalIgnoreCase) && !v.IsTemplate);
+            ElementId viewIdForExport = ElementId.InvalidElementId;
 
-            if (targetView == null)
+            if (!string.IsNullOrEmpty(ViewName))
             {
-                Logger.Error($"[IfcExportConfig] ❌ Вид '{ViewName}' не найден");
-                return null;
+                var targetView = new FilteredElementCollector(Doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.View))
+                    .Cast<Autodesk.Revit.DB.View>()
+                    .FirstOrDefault(v => v.Name.Equals(ViewName, StringComparison.OrdinalIgnoreCase) && !v.IsTemplate);
+
+                if (targetView != null)
+                {
+                    viewIdForExport = targetView.Id;
+                    Logger.Info($"[IfcExportConfig] ✅ Найден вид для экспорта: '{targetView.Name}'");
+                }
+                else
+                {
+                    Logger.Warning($"[IfcExportConfig] ⚠️ Вид '{ViewName}' не найден в модели. Будет выполнен экспорт ВСЕЙ модели (InvalidElementId).");
+                }
+            }
+            else
+            {
+                Logger.Info("[IfcExportConfig] ℹ️ Вид не указан в конфигурации. Будет выполнен экспорт ВСЕЙ модели (InvalidElementId).");
             }
 
             var config = CreateDefaultConfiguration();
@@ -46,28 +60,31 @@ namespace BatchExportIfc
             // 🔥 Загрузка и применение JSON (включая ExportUserDefinedPsetsFileName)
             var jsonLoader = new IfcJsonConfigLoader();
             jsonLoader.ApplyJsonToConfig(JsonConfigPath, config, config.GetType());
+
             if (!string.IsNullOrEmpty(_mappingOverridePath) && File.Exists(_mappingOverridePath))
             {
                 SetConfigProperty(config, "ExportUserDefinedPsets", true);
                 SetConfigProperty(config, "ExportUserDefinedPsetsFileName", _mappingOverridePath);
                 Logger.Info($"[IfcExportConfig] 🔄 Мэппинг переопределён из Excel: {Path.GetFileName(_mappingOverridePath)}");
             }
+
             // Создание IFCExportOptions
             var exportOptions = (IFCExportOptions)Activator.CreateInstance(typeof(IFCExportOptions));
-            UpdateOptionsWithContext(Doc, config, exportOptions, targetView.Id, config.GetType());
+
+            // Передаем viewIdForExport (он может быть InvalidElementId, что корректно обрабатывается API как "вся модель")
+            UpdateOptionsWithContext(Doc, config, exportOptions, viewIdForExport, config.GetType());
 
             Logger.Info("[IfcExportConfig] ✅ GetConfig() завершён");
             return exportOptions;
         }
 
-        #region Вспомогательные методы (без изменений, кроме сигнатур)
+        #region Вспомогательные методы
         private object CreateDefaultConfiguration()
         {
             string revitPath = Path.GetDirectoryName(typeof(Document).Assembly.Location);
             string expectedPath = Path.Combine(revitPath, @"AddIns\IFCExporterUI\Autodesk.IFC.Export.UI.dll");
             Logger.Debug($"[IfcExportConfig] Поиск сборки: {expectedPath}");
 
-            // 🔍 Безопасный поиск без LINQ (обход NotSupportedException в динамических сборках)
             Assembly loadedAssembly = null;
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -85,7 +102,6 @@ namespace BatchExportIfc
                 catch { /* Игнорируем другие ошибки доступа к метаданным */ }
             }
 
-            // Fallback: загрузка с диска, если не найдена в памяти
             if (loadedAssembly == null && File.Exists(expectedPath))
             {
                 try
